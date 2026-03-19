@@ -682,6 +682,20 @@ window_get_active_at(struct window *w, u_int x, u_int y)
 			continue;
 		window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 		if (!window_pane_is_floating(wp)) {
+			if (window_pane_box_mode(wp)) {
+				/*
+				 * Include box border area and adjacent
+				 * separator cells so that clicks on the
+				 * separator (used for resize dragging)
+				 * still resolve to a pane.
+				 */
+				if ((int)x < wp->xoff ||
+				    x > wp->xoff + (int)wp->sx ||
+				    (int)y < wp->yoff ||
+				    y > wp->yoff + (int)wp->sy)
+					continue;
+				return (wp);
+			}
 			/*
 			 * Tiled - to and including the right border, excluding
 			 * the bottom border.
