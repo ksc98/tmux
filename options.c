@@ -1248,27 +1248,16 @@ options_push_changes(const char *name)
 		RB_FOREACH(w, windows, &windows)
 			layout_fix_panes(w, NULL);
 	}
-	if (strcmp(name, "pane-border-indicators") == 0) {
+	if (strcmp(name, "pane-border-indicators") == 0 ||
+	    strcmp(name, "pane-box-padding") == 0) {
+		/*
+		 * Reapply the box inset; window_pane_resize is a no-op for
+		 * panes whose applied inset already matches.
+		 */
 		RB_FOREACH(w, windows, &windows) {
-			TAILQ_FOREACH(wp, &w->panes, entry) {
-				u_int	screen_sx, screen_sy;
-
-				/*
-				 * Resize screen buffer for box mode. The PTY
-				 * size is handled by window_pane_send_resize.
-				 */
-				if (window_pane_box_mode(wp) &&
-				    wp->sx >= 3 && wp->sy >= 3) {
-					screen_sx = wp->sx - 2;
-					screen_sy = wp->sy - 2;
-				} else {
-					screen_sx = wp->sx;
-					screen_sy = wp->sy;
-				}
-				screen_resize(&wp->base, screen_sx, screen_sy,
-				    wp->base.saved_grid == NULL);
-				window_pane_send_resize(wp, wp->sx, wp->sy);
-			}
+			TAILQ_FOREACH(wp, &w->panes, entry)
+				window_pane_resize(wp, wp->sx, wp->sy);
+			server_redraw_window(w);
 		}
 	}
 	if (strcmp(name, "codepoint-widths") == 0)

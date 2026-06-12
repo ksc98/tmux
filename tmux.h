@@ -1263,6 +1263,14 @@ struct window_pane {
 	u_int		 sx;
 	u_int		 sy;
 
+	/*
+	 * Content inset applied for box border mode (0 = none). Set when the
+	 * screen and PTY are resized and used by all drawing and positioning
+	 * code so that the applied geometry can never disagree with the
+	 * option state mid-transition.
+	 */
+	u_int		 box_inset;
+
 	int		 xoff;
 	int		 yoff;
 
@@ -3438,7 +3446,7 @@ struct window_pane *window_add_pane(struct window *, struct window_pane *,
 		     u_int, int);
 void		 window_resize(struct window *, u_int, u_int, int, int);
 void		 window_pane_send_resize(struct window_pane *, u_int, u_int);
-int		 window_pane_box_mode(struct window_pane *);
+u_int		 window_pane_box_wanted(struct window_pane *);
 int		 window_zoom(struct window_pane *);
 int		 window_unzoom(struct window *, int);
 int		 window_push_zoom(struct window *, int, int);

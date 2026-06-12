@@ -702,16 +702,21 @@ server_client_check_mouse_in_pane(struct window_pane *wp, int px, int py,
 		if (fwp != NULL)
 			return (KEYC_MOUSE_LOCATION_BORDER);
 
-		/* In box mode, check if click is on any pane's border. */
-		if (window_pane_box_mode(wp)) {
+		/*
+		 * In box mode the whole inset ring (between the pane edge
+		 * and the content rectangle) acts as a border.
+		 */
+		if (wp->box_inset != 0) {
+			u_int	bi = wp->box_inset;
+
 			if (py >= wp->yoff &&
 			    py <= wp->yoff + wp->sy - 1 &&
 			    px >= wp->xoff &&
 			    px <= wp->xoff + wp->sx - 1) {
-				if (py == wp->yoff ||
-				    py == wp->yoff + wp->sy - 1 ||
-				    px == wp->xoff ||
-				    px == wp->xoff + wp->sx - 1)
+				if (py < wp->yoff + bi ||
+				    py > wp->yoff + wp->sy - 1 - bi ||
+				    px < wp->xoff + bi ||
+				    px > wp->xoff + wp->sx - 1 - bi)
 					return (KEYC_MOUSE_LOCATION_BORDER);
 			}
 		}
@@ -1819,13 +1824,9 @@ server_client_reset_state(struct client *c)
 		cursor = 0;
 		tty_window_offset(tty, &ox, &oy, &sx, &sy);
 
-		/* Account for box mode offset. */
-		pxoff = wp->xoff;
-		pyoff = wp->yoff;
-		if (window_pane_box_mode(wp)) {
-			pxoff += 1;
-			pyoff += 1;
-		}
+		/* Account for box inset. */
+		pxoff = wp->xoff + (int)wp->box_inset;
+		pyoff = wp->yoff + (int)wp->box_inset;
 
 		if (pxoff + (int)s->cx >= (int)ox &&
 		    pxoff + (int)s->cx <= (int)ox + (int)sx &&

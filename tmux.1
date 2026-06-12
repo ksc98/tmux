@@ -5436,6 +5436,18 @@ and the active pane uses
 .Ic pane-active-border-style .
 Panes smaller than 3x3 do not show a box border.
 .Pp
+.It Ic pane\-box\-padding Ar padding
+Set the number of blank cells between a pane's edge and its box border line
+when
+.Ic pane\-border\-indicators
+is
+.Ic box
+or
+.Ic box-all .
+Larger values draw the box further inside the pane, leaving a gap around it.
+The pane content shrinks accordingly; panes too small for the configured
+padding fall back to smaller padding (or no box) as needed.
+.Pp
 .It Ic pane\-border\-lines Ar type
 Set the type of characters used for drawing pane borders.
 .Ar type

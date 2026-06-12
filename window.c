@@ -442,14 +442,9 @@ window_pane_send_resize(struct window_pane *wp, u_int sx, u_int sy)
 	if (wp->fd == -1)
 		return;
 
-	/* Reduce PTY size if box mode is active. */
-	if (window_pane_box_mode(wp)) {
-		pty_sx = sx - 2;
-		pty_sy = sy - 2;
-	} else {
-		pty_sx = sx;
-		pty_sy = sy;
-	}
+	/* Reduce PTY size by the applied box inset. */
+	pty_sx = sx - 2 * wp->box_inset;
+	pty_sy = sy - 2 * wp->box_inset;
 
 	log_debug("%s: %%%u resize to %u,%u (pty %u,%u)", __func__, wp->id,
 	    sx, sy, pty_sx, pty_sy);
@@ -484,26 +479,41 @@ window_has_floating_panes(struct window *w)
 	return (0);
 }
 
-int
-window_pane_box_mode(struct window_pane *wp)
+/*
+ * Content inset wanted for box border mode: 1 for the border line plus
+ * pane-box-padding, reduced as needed so at least one content cell remains.
+ * Zero when box mode does not apply to this pane.
+ */
+u_int
+window_pane_box_wanted(struct window_pane *wp)
 {
-	struct window	*w = wp->window;
-	int		 indicator;
+	struct window		*w = wp->window;
+	struct window_pane	*loop;
+	u_int			 n, inset;
+	int			 indicator;
 
 	/* Must have box mode enabled. */
 	indicator = options_get_number(w->options, "pane-border-indicators");
 	if (indicator != PANE_BORDER_BOX && indicator != PANE_BORDER_BOX_ALL)
 		return (0);
 
-	/* Must have more than one pane. */
-	if (TAILQ_NEXT(TAILQ_FIRST(&w->panes), entry) == NULL)
+	/* Floating panes draw their own borders. */
+	if (window_pane_is_floating(wp))
 		return (0);
 
-	/* Pane must be at least 3x3 to fit content inside border. */
-	if (wp->sx < 3 || wp->sy < 3)
+	/* Must have more than one tiled pane. */
+	n = 0;
+	TAILQ_FOREACH(loop, &w->panes, entry) {
+		if (!window_pane_is_floating(loop))
+			n++;
+	}
+	if (n < 2)
 		return (0);
 
-	return (1);
+	inset = 1 + options_get_number(w->options, "pane-box-padding");
+	while (inset > 0 && (wp->sx < 2 * inset + 1 || wp->sy < 2 * inset + 1))
+		inset--;
+	return (inset);
 }
 
 int
@@ -683,7 +693,7 @@ window_get_active_at(struct window *w, u_int x, u_int y)
 			continue;
 		window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 		if (!window_pane_is_floating(wp)) {
-			if (window_pane_box_mode(wp)) {
+			if (wp->box_inset != 0) {
 				/*
 				 * Include box border area and adjacent
 				 * separator cells so that clicks on the
@@ -1242,7 +1252,8 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 	struct window_pane_resize	*r;
 	u_int				 screen_sx, screen_sy;
 
-	if (sx == wp->sx && sy == wp->sy)
+	if (sx == wp->sx && sy == wp->sy &&
+	    window_pane_box_wanted(wp) == wp->box_inset)
 		return;
 
 	screen_write_stop_sync(wp);
@@ -1258,16 +1269,13 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 	wp->sy = sy;
 
 	/*
-	 * Reduce screen buffer size for box mode so content cannot
-	 * overwrite the border area.
+	 * Apply the box inset now and store it so drawing and positioning
+	 * use the geometry that was actually applied, not whatever the
+	 * options say at draw time.
 	 */
-	if (window_pane_box_mode(wp) && sx >= 3 && sy >= 3) {
-		screen_sx = sx - 2;
-		screen_sy = sy - 2;
-	} else {
-		screen_sx = sx;
-		screen_sy = sy;
-	}
+	wp->box_inset = window_pane_box_wanted(wp);
+	screen_sx = sx - 2 * wp->box_inset;
+	screen_sy = sy - 2 * wp->box_inset;
 
 	log_debug("%s: %%%u resize %ux%u (screen %ux%u)", __func__, wp->id,
 	    sx, sy, screen_sx, screen_sy);
