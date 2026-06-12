@@ -762,7 +762,7 @@ int
 cmd_mouse_at(struct window_pane *wp, struct mouse_event *m, u_int *xp,
     u_int *yp, int last)
 {
-	u_int	x, y;
+	u_int	x, y, csx, csy;
 
 	if (last) {
 		x = m->lx + m->ox;
@@ -780,11 +780,29 @@ cmd_mouse_at(struct window_pane *wp, struct mouse_event *m, u_int *xp,
 		return (-1);
 	if ((int)y < wp->yoff || (int)y >= wp->yoff + (int)wp->sy)
 		return (-1);
+	x -= wp->xoff;
+	y -= wp->yoff;
+
+	/*
+	 * Translate into the box-inset content area, clamping events on the
+	 * border ring to the nearest content cell so drag selections that
+	 * cross the box line behave naturally.
+	 */
+	csx = wp->sx - wp->box_il - wp->box_ir;
+	csy = wp->sy - wp->box_it - wp->box_ib;
+	if (csx == 0 || csy == 0)
+		return (-1);
+	x = (x <= wp->box_il) ? 0 : x - wp->box_il;
+	if (x >= csx)
+		x = csx - 1;
+	y = (y <= wp->box_it) ? 0 : y - wp->box_it;
+	if (y >= csy)
+		y = csy - 1;
 
 	if (xp != NULL)
-		*xp = x - wp->xoff;
+		*xp = x;
 	if (yp != NULL)
-		*yp = y - wp->yoff;
+		*yp = y;
 	return (0);
 }
 
