@@ -489,7 +489,7 @@ window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
     u_char *it, u_char *ib)
 {
 	struct window	*w = wp->window;
-	u_int		 inset;
+	u_int		 inset, wsx, wsy;
 	int		 indicator;
 
 	*il = *ir = *it = *ib = 0;
@@ -519,14 +519,28 @@ window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
 		return;
 	}
 
-	/* Frame mode: inset only the sides on the window edge. */
+	/*
+	 * Frame mode: inset only the sides on the window edge. Edge tests
+	 * must compare against the layout root size, not w->sx/sy: during
+	 * resize_window(), layout_fix_panes() resizes panes before
+	 * window_resize() updates w->sx/sy, so the window size is stale here
+	 * and the right/bottom tests would fail, silently dropping those
+	 * insets and clipping the frame.
+	 */
+	if (w->layout_root != NULL) {
+		wsx = w->layout_root->sx;
+		wsy = w->layout_root->sy;
+	} else {
+		wsx = w->sx;
+		wsy = w->sy;
+	}
 	for (;;) {
 		u_char	l, r, t, b;
 
 		l = (wp->xoff == 0) ? inset : 0;
-		r = (wp->xoff + (int)wp->sx == (int)w->sx) ? inset : 0;
+		r = (wp->xoff + (int)wp->sx == (int)wsx) ? inset : 0;
 		t = (wp->yoff == 0) ? inset : 0;
-		b = (wp->yoff + (int)wp->sy == (int)w->sy) ? inset : 0;
+		b = (wp->yoff + (int)wp->sy == (int)wsy) ? inset : 0;
 		if (inset == 0 ||
 		    (wp->sx > (u_int)(l + r) && wp->sy > (u_int)(t + b))) {
 			*il = l;
