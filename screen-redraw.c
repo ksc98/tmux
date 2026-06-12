@@ -92,6 +92,10 @@ screen_redraw_border_set(struct window *w, struct window_pane *wp,
 		gc->attr &= ~GRID_ATTR_CHARSET;
 		utf8_set(&gc->data, ' ');
 		break;
+	case PANE_LINES_ROUNDED:
+		gc->attr &= ~GRID_ATTR_CHARSET;
+		utf8_copy(&gc->data, tty_acs_rounded_borders(cell_type));
+		break;
 	default:
 		gc->attr |= GRID_ATTR_CHARSET;
 		utf8_set(&gc->data, CELL_BORDERS[cell_type]);

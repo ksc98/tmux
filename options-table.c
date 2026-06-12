@@ -76,7 +76,8 @@ static const char *options_table_pane_border_indicators_list[] = {
 	"off", "colour", "arrows", "both", "box", "box-all", NULL
 };
 static const char *options_table_pane_border_lines_list[] = {
-	"single", "double", "heavy", "simple", "number", "spaces", NULL
+	"single", "double", "heavy", "simple", "number", "spaces", "rounded",
+	NULL
 };
 static const char *options_table_popup_border_lines_list[] = {
 	"single", "double", "heavy", "simple", "rounded", "padded", "none", NULL

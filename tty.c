@@ -1517,7 +1517,7 @@ tty_set_client_cb(struct tty_ctx *ttyctx, struct client *c)
 	else
 		ttyctx->flags &= ~TTY_CTX_WINDOW_BIGGER;
 
-	ttyctx->yoff = ttyctx->ryoff = wp->yoff;
+	ttyctx->yoff = ttyctx->ryoff = wp->yoff + wp->box_inset;
 	if (status_at_line(c) == 0)
 		ttyctx->yoff += status_line_size(c);
 
@@ -1540,9 +1540,9 @@ tty_draw_images(struct client *c, struct window_pane *wp, struct screen *s)
 		ttyctx.orlower = s->rlower;
 		ttyctx.orupper = s->rupper;
 
-		ttyctx.xoff = ttyctx.rxoff = wp->xoff;
-		ttyctx.sx = wp->sx;
-		ttyctx.sy = wp->sy;
+		ttyctx.xoff = ttyctx.rxoff = wp->xoff + wp->box_inset;
+		ttyctx.sx = wp->sx - 2 * wp->box_inset;
+		ttyctx.sy = wp->sy - 2 * wp->box_inset;
 
 		ttyctx.image = im;
 		ttyctx.arg = wp;
