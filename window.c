@@ -511,21 +511,11 @@ window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
 	 */
 	inset = 1 + options_get_number(w->options, "pane-box-padding");
 
-	if (indicator == PANE_BORDER_BOX || indicator == PANE_BORDER_BOX_ALL) {
-		while (inset > 0 &&
-		    (wp->sx < 2 * inset + 1 || wp->sy < 2 * inset + 1))
-			inset--;
-		*il = *ir = *it = *ib = inset;
-		return;
-	}
-
 	/*
-	 * Frame mode: inset only the sides on the window edge. Edge tests
-	 * must compare against the layout root size, not w->sx/sy: during
-	 * resize_window(), layout_fix_panes() resizes panes before
-	 * window_resize() updates w->sx/sy, so the window size is stale here
-	 * and the right/bottom tests would fail, silently dropping those
-	 * insets and clipping the frame.
+	 * Edge tests must compare against the layout root size, not
+	 * w->sx/sy: during resize_window(), layout_fix_panes() resizes panes
+	 * before window_resize() updates w->sx/sy, so the window size is
+	 * stale here and right/bottom tests against it would be wrong.
 	 */
 	if (w->layout_root != NULL) {
 		wsx = w->layout_root->sx;
@@ -534,6 +524,38 @@ window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
 		wsx = w->sx;
 		wsy = w->sy;
 	}
+
+	if (indicator == PANE_BORDER_BOX || indicator == PANE_BORDER_BOX_ALL) {
+		int	interior_r = (wp->xoff + (int)wp->sx != (int)wsx);
+		int	interior_b = (wp->yoff + (int)wp->sy != (int)wsy);
+
+		/*
+		 * Interior right/bottom sides draw their box line in the
+		 * adjacent separator cell instead of inside the pane, so two
+		 * adjacent boxes sit in adjacent cells rather than two cells
+		 * apart. The content inset on those sides is one less.
+		 */
+		for (;;) {
+			u_char	l, r, t, b;
+
+			if (inset == 0)
+				return;
+			l = t = inset;
+			r = interior_r ? inset - 1 : inset;
+			b = interior_b ? inset - 1 : inset;
+			if (wp->sx > (u_int)(l + r) &&
+			    wp->sy > (u_int)(t + b)) {
+				*il = l;
+				*ir = r;
+				*it = t;
+				*ib = b;
+				return;
+			}
+			inset--;
+		}
+	}
+
+	/* Frame mode: inset only the sides on the window edge. */
 	for (;;) {
 		u_char	l, r, t, b;
 
@@ -551,6 +573,26 @@ window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
 		}
 		inset--;
 	}
+}
+
+/*
+ * Does the pane have a box/frame border line on its top (top != 0) or bottom
+ * edge? Box modes always line all four sides while the box is on (an interior
+ * bottom has ib == 0 because its line sits in the separator row, so the inset
+ * alone is not a valid signal); frame mode lines only inset sides.
+ */
+int
+window_pane_box_has_line(struct window_pane *wp, int top)
+{
+	int	indicator;
+
+	indicator = options_get_number(wp->window->options,
+	    "pane-border-indicators");
+	if (indicator == PANE_BORDER_BOX || indicator == PANE_BORDER_BOX_ALL)
+		return (wp->box_il != 0);
+	if (indicator == PANE_BORDER_FRAME)
+		return (top ? wp->box_it != 0 : wp->box_ib != 0);
+	return (0);
 }
 
 /* Check if a pane's applied box insets differ from what is wanted. */

@@ -621,8 +621,8 @@ screen_redraw_make_pane_status(struct client *c, struct window_pane *wp,
 	expanded = format_expand_time(ft, fmt);
 	if (wp->sx < 4)
 		width = 0;
-	else if ((pane_status == PANE_STATUS_TOP && wp->box_it != 0) ||
-	    (pane_status != PANE_STATUS_TOP && wp->box_ib != 0)) {
+	else if (window_pane_box_has_line(wp,
+	    pane_status == PANE_STATUS_TOP)) {
 		/* Box/frame mode: the title sits inside the border line. */
 		if (wp->sx >= (u_int)wp->box_il + wp->box_ir + 4)
 			width = wp->sx - wp->box_il - wp->box_ir - 4;
@@ -695,10 +695,8 @@ screen_redraw_draw_pane_status(struct screen_redraw_ctx *ctx)
 		s = &wp->status_screen;
 
 		size = wp->status_size;
-		if ((ctx->pane_status == PANE_STATUS_TOP &&
-		    wp->box_it != 0) ||
-		    (ctx->pane_status != PANE_STATUS_TOP &&
-		    wp->box_ib != 0)) {
+		if (window_pane_box_has_line(wp,
+		    ctx->pane_status == PANE_STATUS_TOP)) {
 			/*
 			 * Box/frame mode: draw the status into the border
 			 * line like a title.
@@ -1024,7 +1022,8 @@ screen_redraw_draw_border_arrows(struct screen_redraw_ctx *ctx, int i,
 
 /* Draw a border cell. */
 static void
-screen_redraw_draw_borders_cell(struct screen_redraw_ctx *ctx, u_int i, u_int j)
+screen_redraw_draw_borders_cell(struct screen_redraw_ctx *ctx, u_int i, u_int j,
+    int only_outside)
 {
 	struct client		*c = ctx->c;
 	struct session		*s = c->session;
@@ -1048,6 +1047,24 @@ screen_redraw_draw_borders_cell(struct screen_redraw_ctx *ctx, u_int i, u_int j)
 	cell_type = screen_redraw_check_cell(ctx, x, y, &wp);
 	if (cell_type == CELL_INSIDE || cell_type == CELL_SCROLLBAR)
 		return;
+	/*
+	 * Box mode: the box pass owns every cell strictly inside the window
+	 * (pane rings and separators); this pass may only paint the outside
+	 * fill and the window-boundary line at x == w->sx / y == w->sy shown
+	 * when the window is smaller than the client.
+	 */
+	if (only_outside && cell_type != CELL_OUTSIDE) {
+		if (x < w->sx && y < w->sy)
+			return;
+		/*
+		 * Window-boundary lines: flatten junction types — there are
+		 * no separator lines inside the window for them to join.
+		 */
+		if (y == w->sy && x < w->sx)
+			cell_type = CELL_LEFTRIGHT;
+		else if (x == w->sx && y < w->sy)
+			cell_type = CELL_TOPBOTTOM;
+	}
 
 	if (wp == NULL || cell_type == CELL_OUTSIDE) {
 		if (!ctx->no_pane_gc_set) {
@@ -1098,21 +1115,23 @@ screen_redraw_draw_borders(struct screen_redraw_ctx *ctx)
 	struct options		*oo = w->options;
 	struct window_pane	*wp;
 	u_int			 i, j;
-	int			 bi;
+	int			 bi, only_outside;
 
 	log_debug("%s: %s @%u", __func__, c->name, w->id);
 
 	/*
-	 * Skip drawing pane separator borders when box mode is active,
-	 * since each pane has its own complete box border. If there are
-	 * floating panes their borders are still needed; the box drawing
-	 * pass blanks the unused separator cells afterwards.
+	 * When box mode is active each pane has its own complete box border,
+	 * so the shared separator borders must not be drawn — but the cells
+	 * outside the window still need their fill, or they go stale when
+	 * the window shrinks. Restrict the pass to CELL_OUTSIDE instead of
+	 * skipping it. If there are floating panes their borders are still
+	 * needed; the box drawing pass repaints the separator cells
+	 * afterwards.
 	 */
 	bi = options_get_number(oo, "pane-border-indicators");
-	if ((bi == PANE_BORDER_BOX || bi == PANE_BORDER_BOX_ALL) &&
+	only_outside = ((bi == PANE_BORDER_BOX || bi == PANE_BORDER_BOX_ALL) &&
 	    TAILQ_NEXT(TAILQ_FIRST(&w->panes), entry) != NULL &&
-	    !window_has_floating_panes(w))
-		return;
+	    !window_has_floating_panes(w));
 
 	TAILQ_FOREACH(wp, &w->panes, entry) {
 		wp->border_gc_set = 0;
@@ -1121,7 +1140,8 @@ screen_redraw_draw_borders(struct screen_redraw_ctx *ctx)
 
 	for (j = 0; j < c->tty.sy - ctx->statuslines; j++) {
 		for (i = 0; i < c->tty.sx; i++)
-			screen_redraw_draw_borders_cell(ctx, i, j);
+			screen_redraw_draw_borders_cell(ctx, i, j,
+			    only_outside);
 	}
 }
 
@@ -1208,9 +1228,8 @@ screen_redraw_draw_active_box(struct screen_redraw_ctx *ctx)
 	struct window_pane	*wp, *active_wp;
 	struct grid_cell	 gc, blank_gc;
 	struct format_tree	*ft;
-	struct visible_ranges	*r;
 	u_int			 y, bi, left, right, top, bottom;
-	u_int			 bleft, bright, btop, bbottom, sep_x, sep_y;
+	u_int			 bleft, bright, btop, bbottom;
 	int			 indicator, is_active, draw_border;
 
 	indicator = options_get_number(oo, "pane-border-indicators");
@@ -1229,15 +1248,30 @@ screen_redraw_draw_active_box(struct screen_redraw_ctx *ctx)
 		if (bi == 0)
 			continue;
 
-		/* Pane rectangle and box line rectangle. */
+		/*
+		 * Pane rectangle, extended over the separator column/row on
+		 * interior sides: those hold the pane's right/bottom box
+		 * lines (and otherwise need blanking, as they normally hold
+		 * the shared pane borders).
+		 */
 		left = wp->xoff;
 		right = wp->xoff + wp->sx - 1;
 		top = wp->yoff;
 		bottom = wp->yoff + wp->sy - 1;
+		if (wp->xoff + wp->sx < w->sx)
+			right++;
+		if (wp->yoff + wp->sy < w->sy)
+			bottom++;
+
+		/*
+		 * Box line rectangle. Left/top lines are always inside the
+		 * pane (inset >= 1); right/bottom lines sit in the separator
+		 * cell on interior sides (inset is one less there).
+		 */
 		bleft = left + bi - 1;
-		bright = right - bi + 1;
-		btop = top + bi - 1;
-		bbottom = bottom - bi + 1;
+		btop = top + wp->box_it - 1;
+		bright = wp->xoff + wp->sx - wp->box_ir;
+		bbottom = wp->yoff + wp->sy - wp->box_ib;
 
 		is_active = (wp == active_wp);
 		draw_border = is_active || indicator == PANE_BORDER_BOX_ALL;
@@ -1260,50 +1294,23 @@ screen_redraw_draw_active_box(struct screen_redraw_ctx *ctx)
 		}
 
 		/*
-		 * Draw the inset ring. Full rows at the top and bottom,
-		 * left and right parts only for the rows in between.
+		 * Draw the inset ring (separators included via the extended
+		 * rectangle). Full rows at the top and bottom, left and
+		 * right parts only for the rows in between.
 		 */
 		for (y = top; y <= bottom; y++) {
-			if (y >= top + bi && y <= bottom - bi) {
+			if (y > btop && y < bbottom) {
 				screen_redraw_draw_box_row(ctx, wp, left,
-				    left + bi - 1, y, bleft, bright, btop,
+				    bleft, y, bleft, bright, btop,
 				    bbottom, draw_border, &gc, &blank_gc);
 				screen_redraw_draw_box_row(ctx, wp,
-				    right - bi + 1, right, y, bleft, bright,
+				    bright, right, y, bleft, bright,
 				    btop, bbottom, draw_border, &gc,
 				    &blank_gc);
 			} else {
 				screen_redraw_draw_box_row(ctx, wp, left,
 				    right, y, bleft, bright, btop, bbottom,
 				    draw_border, &gc, &blank_gc);
-			}
-		}
-
-		/*
-		 * Clear the separator column and row adjacent to this pane
-		 * which normally hold the shared pane borders.
-		 */
-		sep_x = wp->xoff + wp->sx;
-		if (sep_x < w->sx) {
-			for (y = top; y <= bottom; y++) {
-				r = tty_check_overlay_range(&c->tty, sep_x, y,
-				    1);
-				r = screen_redraw_get_visible_ranges(wp,
-				    sep_x, y, 1, r);
-				screen_redraw_draw_box_cell(ctx, r, sep_x, y,
-				    &blank_gc);
-			}
-		}
-		sep_y = wp->yoff + wp->sy;
-		if (sep_y < w->sy) {
-			if (sep_x < w->sx) {
-				screen_redraw_draw_box_row(ctx, wp, left,
-				    sep_x, sep_y, 1, 0, 1, 0, 0, &gc,
-				    &blank_gc);
-			} else {
-				screen_redraw_draw_box_row(ctx, wp, left,
-				    right, sep_y, 1, 0, 1, 0, 0, &gc,
-				    &blank_gc);
 			}
 		}
 	}

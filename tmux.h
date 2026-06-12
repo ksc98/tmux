@@ -3456,6 +3456,7 @@ void		 window_pane_send_resize(struct window_pane *, u_int, u_int);
 void		 window_pane_box_wanted(struct window_pane *, u_char *,
 		     u_char *, u_char *, u_char *);
 int		 window_pane_box_changed(struct window_pane *);
+int		 window_pane_box_has_line(struct window_pane *, int);
 int		 window_zoom(struct window_pane *);
 int		 window_unzoom(struct window *, int);
 int		 window_push_zoom(struct window *, int, int);
