@@ -1097,6 +1097,7 @@ enum pane_lines {
 #define PANE_BORDER_BOTH 3
 #define PANE_BORDER_BOX 4
 #define PANE_BORDER_BOX_ALL 5
+#define PANE_BORDER_FRAME 6
 
 /* Mode returned by window_pane_mode function. */
 #define WINDOW_PANE_NO_MODE 0
@@ -1265,12 +1266,17 @@ struct window_pane {
 	u_int		 sy;
 
 	/*
-	 * Content inset applied for box border mode (0 = none). Set when the
-	 * screen and PTY are resized and used by all drawing and positioning
-	 * code so that the applied geometry can never disagree with the
-	 * option state mid-transition.
+	 * Content insets applied for box/frame border modes (0 = none), one
+	 * per side. Set when the screen and PTY are resized and used by all
+	 * drawing and positioning code so that the applied geometry can
+	 * never disagree with the option state mid-transition. In box modes
+	 * all four are equal; in frame mode only sides touching the window
+	 * edge are inset.
 	 */
-	u_int		 box_inset;
+	u_char		 box_il;
+	u_char		 box_ir;
+	u_char		 box_it;
+	u_char		 box_ib;
 
 	int		 xoff;
 	int		 yoff;
@@ -3447,7 +3453,9 @@ struct window_pane *window_add_pane(struct window *, struct window_pane *,
 		     u_int, int);
 void		 window_resize(struct window *, u_int, u_int, int, int);
 void		 window_pane_send_resize(struct window_pane *, u_int, u_int);
-u_int		 window_pane_box_wanted(struct window_pane *);
+void		 window_pane_box_wanted(struct window_pane *, u_char *,
+		     u_char *, u_char *, u_char *);
+int		 window_pane_box_changed(struct window_pane *);
 int		 window_zoom(struct window_pane *);
 int		 window_unzoom(struct window *, int);
 int		 window_push_zoom(struct window *, int, int);

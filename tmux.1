@@ -5414,7 +5414,7 @@ but set the starting index for pane numbers.
 Set the text shown in pane border status lines.
 .Pp
 .It Xo Ic pane\-border\-indicators
-.Op Ic off | colour | arrows | both | box | box-all
+.Op Ic off | colour | arrows | both | box | box-all | frame
 .Xc
 Indicate active pane by colouring only half of the border in windows with
 exactly two panes, by displaying arrow markers, by drawing both, by drawing
@@ -5435,6 +5435,11 @@ all panes show borders using
 and the active pane uses
 .Ic pane-active-border-style .
 Panes smaller than 3x3 do not show a box border.
+.Ic frame
+draws a single shared frame around the window edge and keeps the normal
+shared borders between panes, joined with junction characters, so every pane
+is fully enclosed while only one border line separates adjacent panes.
+Only the pane sides touching the window edge are inset.
 .Pp
 .It Ic pane\-box\-padding Ar padding
 Set the number of blank cells between a pane's edge and its box border line

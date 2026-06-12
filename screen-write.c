@@ -169,10 +169,10 @@ screen_write_set_client_cb(struct tty_ctx *ttyctx, struct client *c)
 	ttyctx->yoff = ttyctx->ryoff = wp->yoff;
 
 	/* Apply box inset for content positioning. */
-	ttyctx->xoff += wp->box_inset;
-	ttyctx->yoff += wp->box_inset;
-	ttyctx->rxoff += wp->box_inset;
-	ttyctx->ryoff += wp->box_inset;
+	ttyctx->xoff += wp->box_il;
+	ttyctx->yoff += wp->box_it;
+	ttyctx->rxoff += wp->box_il;
+	ttyctx->ryoff += wp->box_it;
 
 	if (status_at_line(c) == 0)
 		ttyctx->yoff += status_line_size(c);

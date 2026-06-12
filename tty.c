@@ -993,8 +993,8 @@ tty_window_offset1(struct tty *tty, u_int *ox, u_int *oy, u_int *sx, u_int *sy)
 		cy = wp->yoff + wp->screen->cy;
 
 		/* Account for box inset. */
-		cx += wp->box_inset;
-		cy += wp->box_inset;
+		cx += wp->box_il;
+		cy += wp->box_it;
 
 		if (cx < *sx)
 			*ox = 0;
@@ -1517,7 +1517,7 @@ tty_set_client_cb(struct tty_ctx *ttyctx, struct client *c)
 	else
 		ttyctx->flags &= ~TTY_CTX_WINDOW_BIGGER;
 
-	ttyctx->yoff = ttyctx->ryoff = wp->yoff + wp->box_inset;
+	ttyctx->yoff = ttyctx->ryoff = wp->yoff + wp->box_it;
 	if (status_at_line(c) == 0)
 		ttyctx->yoff += status_line_size(c);
 
@@ -1540,9 +1540,9 @@ tty_draw_images(struct client *c, struct window_pane *wp, struct screen *s)
 		ttyctx.orlower = s->rlower;
 		ttyctx.orupper = s->rupper;
 
-		ttyctx.xoff = ttyctx.rxoff = wp->xoff + wp->box_inset;
-		ttyctx.sx = wp->sx - 2 * wp->box_inset;
-		ttyctx.sy = wp->sy - 2 * wp->box_inset;
+		ttyctx.xoff = ttyctx.rxoff = wp->xoff + wp->box_il;
+		ttyctx.sx = wp->sx - wp->box_il - wp->box_ir;
+		ttyctx.sy = wp->sy - wp->box_it - wp->box_ib;
 
 		ttyctx.image = im;
 		ttyctx.arg = wp;

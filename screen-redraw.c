@@ -36,6 +36,7 @@ static void	screen_redraw_draw_scrollbar(struct screen_redraw_ctx *,
 static void	screen_redraw_draw_pane_scrollbar(struct screen_redraw_ctx *,
 		    struct window_pane *);
 static void	screen_redraw_draw_active_box(struct screen_redraw_ctx *);
+static void	screen_redraw_draw_frame(struct screen_redraw_ctx *);
 
 #define START_ISOLATE "\342\201\246"
 #define END_ISOLATE   "\342\201\251"
@@ -620,10 +621,11 @@ screen_redraw_make_pane_status(struct client *c, struct window_pane *wp,
 	expanded = format_expand_time(ft, fmt);
 	if (wp->sx < 4)
 		width = 0;
-	else if (wp->box_inset != 0) {
-		/* Box mode: the title sits inside the box border line. */
-		if (wp->sx >= 2 * wp->box_inset + 4)
-			width = wp->sx - 2 * wp->box_inset - 4;
+	else if ((pane_status == PANE_STATUS_TOP && wp->box_it != 0) ||
+	    (pane_status != PANE_STATUS_TOP && wp->box_ib != 0)) {
+		/* Box/frame mode: the title sits inside the border line. */
+		if (wp->sx >= (u_int)wp->box_il + wp->box_ir + 4)
+			width = wp->sx - wp->box_il - wp->box_ir - 4;
 		else
 			width = 0;
 	} else
@@ -693,16 +695,19 @@ screen_redraw_draw_pane_status(struct screen_redraw_ctx *ctx)
 		s = &wp->status_screen;
 
 		size = wp->status_size;
-		if (wp->box_inset != 0) {
+		if ((ctx->pane_status == PANE_STATUS_TOP &&
+		    wp->box_it != 0) ||
+		    (ctx->pane_status != PANE_STATUS_TOP &&
+		    wp->box_ib != 0)) {
 			/*
-			 * Box mode: draw the status into the box border line
-			 * like a title.
+			 * Box/frame mode: draw the status into the border
+			 * line like a title.
 			 */
 			if (ctx->pane_status == PANE_STATUS_TOP)
-				yoff = wp->yoff + wp->box_inset - 1;
+				yoff = wp->yoff + wp->box_it - 1;
 			else
-				yoff = wp->yoff + wp->sy - wp->box_inset;
-			xoff = wp->xoff + wp->box_inset + 1;
+				yoff = wp->yoff + wp->sy - wp->box_ib;
+			xoff = wp->xoff + wp->box_il + 1;
 		} else {
 			if (ctx->pane_status == PANE_STATUS_TOP)
 				yoff = wp->yoff - 1;
@@ -848,6 +853,7 @@ screen_redraw_screen(struct client *c)
 		log_debug("%s: redrawing borders", c->name);
 		screen_redraw_draw_borders(&ctx);
 		screen_redraw_draw_active_box(&ctx);
+		screen_redraw_draw_frame(&ctx);
 		if (ctx.pane_status != PANE_STATUS_OFF)
 			screen_redraw_draw_pane_status(&ctx);
 		screen_redraw_draw_pane_scrollbars(&ctx);
@@ -856,6 +862,7 @@ screen_redraw_screen(struct client *c)
 		log_debug("%s: redrawing panes", c->name);
 		screen_redraw_draw_panes(&ctx);
 		screen_redraw_draw_active_box(&ctx);
+		screen_redraw_draw_frame(&ctx);
 		if (ctx.pane_status != PANE_STATUS_OFF)
 			screen_redraw_draw_pane_status(&ctx);
 		screen_redraw_draw_pane_scrollbars(&ctx);
@@ -890,6 +897,7 @@ screen_redraw_pane(struct client *c, struct window_pane *wp,
 	if (!redraw_scrollbar_only) {
 		screen_redraw_draw_pane(&ctx, wp);
 		screen_redraw_draw_active_box(&ctx);
+		screen_redraw_draw_frame(&ctx);
 		if (ctx.pane_status != PANE_STATUS_OFF)
 			screen_redraw_draw_pane_status(&ctx);
 	}
@@ -1217,7 +1225,7 @@ screen_redraw_draw_active_box(struct screen_redraw_ctx *ctx)
 	TAILQ_FOREACH(wp, &w->panes, entry) {
 		if (!window_pane_visible(wp) || window_pane_is_floating(wp))
 			continue;
-		bi = wp->box_inset;
+		bi = wp->box_il;
 		if (bi == 0)
 			continue;
 
@@ -1296,6 +1304,235 @@ screen_redraw_draw_active_box(struct screen_redraw_ctx *ctx)
 				screen_redraw_draw_box_row(ctx, wp, left,
 				    right, sep_y, 1, 0, 1, 0, 0, &gc,
 				    &blank_gc);
+			}
+		}
+	}
+}
+
+/* Draw the window frame and junctions for frame border mode. */
+static void
+screen_redraw_draw_frame(struct screen_redraw_ctx *ctx)
+{
+	struct client		*c = ctx->c;
+	struct session		*s = c->session;
+	struct window		*w = s->curw->window;
+	struct options		*oo = w->options;
+	struct window_pane	*wp, *active_wp;
+	struct grid_cell	 gc, blank_gc;
+	struct format_tree	*ft;
+	struct visible_ranges	*r;
+	u_int			 x, y, yy, left, right, top, bottom;
+	u_int			 il, ir, it, ib;
+	int			 type;
+
+	if (options_get_number(oo, "pane-border-indicators") !=
+	    PANE_BORDER_FRAME)
+		return;
+
+	active_wp = server_client_get_pane(c);
+
+	memcpy(&blank_gc, &grid_default_cell, sizeof blank_gc);
+	utf8_set(&blank_gc.data, ' ');
+
+	TAILQ_FOREACH(wp, &w->panes, entry) {
+		if (!window_pane_visible(wp) || window_pane_is_floating(wp))
+			continue;
+		il = wp->box_il;
+		ir = wp->box_ir;
+		it = wp->box_it;
+		ib = wp->box_ib;
+		if (il == 0 && ir == 0 && it == 0 && ib == 0)
+			continue;
+
+		left = wp->xoff;
+		right = wp->xoff + wp->sx - 1;
+		top = wp->yoff;
+		bottom = wp->yoff + wp->sy - 1;
+
+		memcpy(&gc, &grid_default_cell, sizeof gc);
+		ft = format_create_defaults(NULL, c, s, s->curw, wp);
+		if (wp == active_wp)
+			style_apply(&gc, oo, "pane-active-border-style", ft);
+		else
+			style_apply(&gc, oo, "pane-border-style", ft);
+		format_free(ft);
+
+		/* Top frame line and padding rows above it. */
+		if (it != 0) {
+			for (yy = top; yy < top + it - 1; yy++) {
+				r = tty_check_overlay_range(&c->tty, left, yy,
+				    wp->sx);
+				r = screen_redraw_get_visible_ranges(wp, left,
+				    yy, wp->sx, r);
+				for (x = left; x <= right; x++) {
+					screen_redraw_draw_box_cell(ctx, r, x,
+					    yy, &blank_gc);
+				}
+			}
+			y = top + it - 1;
+			r = tty_check_overlay_range(&c->tty, left, y, wp->sx);
+			r = screen_redraw_get_visible_ranges(wp, left, y,
+			    wp->sx, r);
+			for (x = left; x <= right; x++) {
+				if (x == left && il != 0)
+					type = CELL_TOPLEFT;
+				else if (x == right && ir != 0)
+					type = CELL_TOPRIGHT;
+				else
+					type = CELL_LEFTRIGHT;
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, type, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x, y,
+				    &gc);
+			}
+			/* Junctions where separators meet the frame line. */
+			if (il == 0 && left > 0) {
+				r = tty_check_overlay_range(&c->tty, left - 1,
+				    y, 1);
+				r = screen_redraw_get_visible_ranges(wp,
+				    left - 1, y, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_TOPJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, left - 1,
+				    y, &gc);
+			}
+			if (ir == 0 && right < w->sx - 1) {
+				r = tty_check_overlay_range(&c->tty,
+				    right + 1, y, 1);
+				r = screen_redraw_get_visible_ranges(wp,
+				    right + 1, y, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_TOPJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, right + 1,
+				    y, &gc);
+			}
+		}
+
+		/* Bottom frame line and padding rows below it. */
+		if (ib != 0) {
+			for (yy = bottom; yy > bottom - ib + 1; yy--) {
+				r = tty_check_overlay_range(&c->tty, left, yy,
+				    wp->sx);
+				r = screen_redraw_get_visible_ranges(wp, left,
+				    yy, wp->sx, r);
+				for (x = left; x <= right; x++) {
+					screen_redraw_draw_box_cell(ctx, r, x,
+					    yy, &blank_gc);
+				}
+			}
+			y = bottom - ib + 1;
+			r = tty_check_overlay_range(&c->tty, left, y, wp->sx);
+			r = screen_redraw_get_visible_ranges(wp, left, y,
+			    wp->sx, r);
+			for (x = left; x <= right; x++) {
+				if (x == left && il != 0)
+					type = CELL_BOTTOMLEFT;
+				else if (x == right && ir != 0)
+					type = CELL_BOTTOMRIGHT;
+				else
+					type = CELL_LEFTRIGHT;
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, type, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x, y,
+				    &gc);
+			}
+			if (il == 0 && left > 0) {
+				r = tty_check_overlay_range(&c->tty, left - 1,
+				    y, 1);
+				r = screen_redraw_get_visible_ranges(wp,
+				    left - 1, y, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_BOTTOMJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, left - 1,
+				    y, &gc);
+			}
+			if (ir == 0 && right < w->sx - 1) {
+				r = tty_check_overlay_range(&c->tty,
+				    right + 1, y, 1);
+				r = screen_redraw_get_visible_ranges(wp,
+				    right + 1, y, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_BOTTOMJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, right + 1,
+				    y, &gc);
+			}
+		}
+
+		/* Left frame line and padding columns. */
+		if (il != 0) {
+			x = left + il - 1;
+			for (y = top + it; y <= bottom - ib; y++) {
+				r = tty_check_overlay_range(&c->tty, left, y,
+				    il);
+				r = screen_redraw_get_visible_ranges(wp, left,
+				    y, il, r);
+				for (yy = left; yy < x; yy++) {
+					screen_redraw_draw_box_cell(ctx, r,
+					    yy, y, &blank_gc);
+				}
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_TOPBOTTOM, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x, y,
+				    &gc);
+			}
+			if (it == 0 && top > 0) {
+				r = tty_check_overlay_range(&c->tty, x,
+				    top - 1, 1);
+				r = screen_redraw_get_visible_ranges(wp, x,
+				    top - 1, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_LEFTJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x,
+				    top - 1, &gc);
+			}
+			if (ib == 0 && bottom < w->sy - 1) {
+				r = tty_check_overlay_range(&c->tty, x,
+				    bottom + 1, 1);
+				r = screen_redraw_get_visible_ranges(wp, x,
+				    bottom + 1, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_LEFTJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x,
+				    bottom + 1, &gc);
+			}
+		}
+
+		/* Right frame line and padding columns. */
+		if (ir != 0) {
+			x = right - ir + 1;
+			for (y = top + it; y <= bottom - ib; y++) {
+				r = tty_check_overlay_range(&c->tty, x, y,
+				    ir);
+				r = screen_redraw_get_visible_ranges(wp, x, y,
+				    ir, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_TOPBOTTOM, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x, y,
+				    &gc);
+				for (yy = x + 1; yy <= right; yy++) {
+					screen_redraw_draw_box_cell(ctx, r,
+					    yy, y, &blank_gc);
+				}
+			}
+			if (it == 0 && top > 0) {
+				r = tty_check_overlay_range(&c->tty, x,
+				    top - 1, 1);
+				r = screen_redraw_get_visible_ranges(wp, x,
+				    top - 1, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_RIGHTJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x,
+				    top - 1, &gc);
+			}
+			if (ib == 0 && bottom < w->sy - 1) {
+				r = tty_check_overlay_range(&c->tty, x,
+				    bottom + 1, 1);
+				r = screen_redraw_get_visible_ranges(wp, x,
+				    bottom + 1, 1, r);
+				screen_redraw_border_set(w, wp,
+				    ctx->pane_lines, CELL_RIGHTJOIN, &gc);
+				screen_redraw_draw_box_cell(ctx, r, x,
+				    bottom + 1, &gc);
 			}
 		}
 	}
@@ -1531,7 +1768,7 @@ screen_redraw_draw_pane(struct screen_redraw_ctx *ctx, struct window_pane *wp)
 	struct screen		*s = wp->screen;
 	struct colour_palette	*palette = &wp->palette;
 	struct grid_cell	 defaults;
-	u_int			 j, k, woy, wx, wy, py, width, csx, csy, bi;
+	u_int			 j, k, woy, wx, wy, py, width, csx, csy;
 	int			 cxoff, cyoff;
 	struct visible_ranges	*r;
 	struct visible_range	*ri;
@@ -1569,9 +1806,8 @@ screen_redraw_draw_pane(struct screen_redraw_ctx *ctx, struct window_pane *wp)
 	if (wp->base.mode & MODE_SYNC)
 		screen_write_stop_sync(wp);
 
-	bi = wp->box_inset;
-	log_debug("%s: %s @%u %%%u inset=%u", __func__, c->name, w->id,
-	    wp->id, bi);
+	log_debug("%s: %s @%u %%%u inset=%u,%u,%u,%u", __func__, c->name,
+	    w->id, wp->id, wp->box_il, wp->box_ir, wp->box_it, wp->box_ib);
 
 	/* Check if pane completely not visible. */
 	if (wp->xoff + (int)wp->sx <= ctx->ox ||
@@ -1579,10 +1815,10 @@ screen_redraw_draw_pane(struct screen_redraw_ctx *ctx, struct window_pane *wp)
 		return;
 
 	/* Content rectangle in window coordinates. */
-	cxoff = wp->xoff + bi;
-	cyoff = wp->yoff + bi;
-	csx = wp->sx - 2 * bi;
-	csy = wp->sy - 2 * bi;
+	cxoff = wp->xoff + wp->box_il;
+	cyoff = wp->yoff + wp->box_it;
+	csx = wp->sx - wp->box_il - wp->box_ir;
+	csy = wp->sy - wp->box_it - wp->box_ib;
 
 	if (ctx->statustop)
 		woy = ctx->statuslines;

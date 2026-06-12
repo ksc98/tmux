@@ -442,9 +442,9 @@ window_pane_send_resize(struct window_pane *wp, u_int sx, u_int sy)
 	if (wp->fd == -1)
 		return;
 
-	/* Reduce PTY size by the applied box inset. */
-	pty_sx = sx - 2 * wp->box_inset;
-	pty_sy = sy - 2 * wp->box_inset;
+	/* Reduce PTY size by the applied box insets. */
+	pty_sx = sx - wp->box_il - wp->box_ir;
+	pty_sy = sy - wp->box_it - wp->box_ib;
 
 	log_debug("%s: %%%u resize to %u,%u (pty %u,%u)", __func__, wp->id,
 	    sx, sy, pty_sx, pty_sy);
@@ -484,36 +484,70 @@ window_has_floating_panes(struct window *w)
  * pane-box-padding, reduced as needed so at least one content cell remains.
  * Zero when box mode does not apply to this pane.
  */
-u_int
-window_pane_box_wanted(struct window_pane *wp)
+void
+window_pane_box_wanted(struct window_pane *wp, u_char *il, u_char *ir,
+    u_char *it, u_char *ib)
 {
-	struct window		*w = wp->window;
-	struct window_pane	*loop;
-	u_int			 n, inset;
-	int			 indicator;
+	struct window	*w = wp->window;
+	u_int		 inset;
+	int		 indicator;
 
-	/* Must have box mode enabled. */
+	*il = *ir = *it = *ib = 0;
+
 	indicator = options_get_number(w->options, "pane-border-indicators");
-	if (indicator != PANE_BORDER_BOX && indicator != PANE_BORDER_BOX_ALL)
-		return (0);
+	if (indicator != PANE_BORDER_BOX && indicator != PANE_BORDER_BOX_ALL &&
+	    indicator != PANE_BORDER_FRAME)
+		return;
 
 	/* Floating panes draw their own borders. */
 	if (window_pane_is_floating(wp))
-		return (0);
+		return;
 
-	/* Must have more than one tiled pane. */
-	n = 0;
-	TAILQ_FOREACH(loop, &w->panes, entry) {
-		if (!window_pane_is_floating(loop))
-			n++;
-	}
-	if (n < 2)
-		return (0);
-
+	/*
+	 * No pane-count condition: a lone pane is boxed too. Box state must
+	 * not depend on the pane list - the survivor of a kill-pane is
+	 * resized while the dead pane is still linked, so a count taken here
+	 * would be stale and leave the stored inset wrong.
+	 */
 	inset = 1 + options_get_number(w->options, "pane-box-padding");
-	while (inset > 0 && (wp->sx < 2 * inset + 1 || wp->sy < 2 * inset + 1))
+
+	if (indicator == PANE_BORDER_BOX || indicator == PANE_BORDER_BOX_ALL) {
+		while (inset > 0 &&
+		    (wp->sx < 2 * inset + 1 || wp->sy < 2 * inset + 1))
+			inset--;
+		*il = *ir = *it = *ib = inset;
+		return;
+	}
+
+	/* Frame mode: inset only the sides on the window edge. */
+	for (;;) {
+		u_char	l, r, t, b;
+
+		l = (wp->xoff == 0) ? inset : 0;
+		r = (wp->xoff + (int)wp->sx == (int)w->sx) ? inset : 0;
+		t = (wp->yoff == 0) ? inset : 0;
+		b = (wp->yoff + (int)wp->sy == (int)w->sy) ? inset : 0;
+		if (inset == 0 ||
+		    (wp->sx > (u_int)(l + r) && wp->sy > (u_int)(t + b))) {
+			*il = l;
+			*ir = r;
+			*it = t;
+			*ib = b;
+			return;
+		}
 		inset--;
-	return (inset);
+	}
+}
+
+/* Check if a pane's applied box insets differ from what is wanted. */
+int
+window_pane_box_changed(struct window_pane *wp)
+{
+	u_char	il, ir, it, ib;
+
+	window_pane_box_wanted(wp, &il, &ir, &it, &ib);
+	return (il != wp->box_il || ir != wp->box_ir || it != wp->box_it ||
+	    ib != wp->box_ib);
 }
 
 int
@@ -693,7 +727,8 @@ window_get_active_at(struct window *w, u_int x, u_int y)
 			continue;
 		window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 		if (!window_pane_is_floating(wp)) {
-			if (wp->box_inset != 0) {
+			if (wp->box_il || wp->box_ir || wp->box_it ||
+			    wp->box_ib) {
 				/*
 				 * Include box border area and adjacent
 				 * separator cells so that clicks on the
@@ -1252,8 +1287,7 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 	struct window_pane_resize	*r;
 	u_int				 screen_sx, screen_sy;
 
-	if (sx == wp->sx && sy == wp->sy &&
-	    window_pane_box_wanted(wp) == wp->box_inset)
+	if (sx == wp->sx && sy == wp->sy && !window_pane_box_changed(wp))
 		return;
 
 	screen_write_stop_sync(wp);
@@ -1273,9 +1307,10 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 	 * use the geometry that was actually applied, not whatever the
 	 * options say at draw time.
 	 */
-	wp->box_inset = window_pane_box_wanted(wp);
-	screen_sx = sx - 2 * wp->box_inset;
-	screen_sy = sy - 2 * wp->box_inset;
+	window_pane_box_wanted(wp, &wp->box_il, &wp->box_ir, &wp->box_it,
+	    &wp->box_ib);
+	screen_sx = sx - wp->box_il - wp->box_ir;
+	screen_sy = sy - wp->box_it - wp->box_ib;
 
 	log_debug("%s: %%%u resize %ux%u (screen %ux%u)", __func__, wp->id,
 	    sx, sy, screen_sx, screen_sy);
